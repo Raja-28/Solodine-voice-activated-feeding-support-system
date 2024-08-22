@@ -1,0 +1,299 @@
+#include <Servo.h>
+#include <SoftwareSerial.h>
+#include "VoiceRecognitionV3.h"
+
+// Define the pin numbers
+const int buttonPin = 2;    // Pin connected to the main button
+const int servoPin = 9;     // Pin connected to the servo motor
+const int proximitySensorPin = A0; // Pin connected to the proximity sensor
+const int pressureSensorPin = A1; // Pin connected to the pressure sensor
+const int infraredSensorPin = A2; // Pin connected to the infrared sensor
+
+// Push button pins
+const int buttonPickUpPin = 3;
+const int buttonKeepPin = 4;
+const int buttonHungryPin = 5;
+const int buttonNeedFoodPin = 6;
+const int buttonSlowlyFeedPin = 7;
+const int buttonMorePin = 8;
+
+// Heating control pins
+const int normalHeatPin = 12;
+const int highHeatPin = 13;
+const int lowHeatPin = 14;
+
+// Heating button pins
+const int buttonNormalHeatPin = 15;
+const int buttonHighHeatPin = 16;
+const int buttonLowHeatPin = 17;
+
+// Create a Servo object
+Servo feedingServo;
+
+// Variable to store button states
+int buttonState = 0;
+int buttonPickUpState = 0;
+int buttonKeepState = 0;
+int buttonHungryState = 0;
+int buttonNeedFoodState = 0;
+int buttonSlowlyFeedState = 0;
+int buttonMoreState = 0;
+int buttonNormalHeatState = 0;
+int buttonHighHeatState = 0;
+int buttonLowHeatState = 0;
+
+// Voice Recognition module pins
+const int rxPin = 11;
+const int txPin = 10;
+
+// SoftwareSerial for voice recognition
+SoftwareSerial mySerial(rxPin, txPin);
+
+// Voice recognition object
+VoiceRecognitionV3 voiceRec;
+
+// Commands
+#define CMD_PICK_UP_FOOD "pick up food"
+#define CMD_KEEP_IT "keep it I'll eat later"
+#define CMD_IM_HUNGRY "I'm hungry"
+#define CMD_I_NEED_FOOD "I need food"
+#define CMD_SLOWLY_FEED "slowly feed it"
+#define CMD_MORE "more and more"
+#define CMD_NORMAL_HEAT "normal heat"
+#define CMD_HIGH_HEAT "high heat"
+#define CMD_LOW_HEAT "low heat"
+
+// State tracking
+enum EatingState { NOT_EATING, EATING, ATE };
+EatingState eatingState = NOT_EATING;
+
+void setup() {
+  // Initialize the button pins as input
+  pinMode(buttonPin, INPUT);
+  pinMode(buttonPickUpPin, INPUT);
+  pinMode(buttonKeepPin, INPUT);
+  pinMode(buttonHungryPin, INPUT);
+  pinMode(buttonNeedFoodPin, INPUT);
+  pinMode(buttonSlowlyFeedPin, INPUT);
+  pinMode(buttonMorePin, INPUT);
+  pinMode(buttonNormalHeatPin, INPUT);
+  pinMode(buttonHighHeatPin, INPUT);
+  pinMode(buttonLowHeatPin, INPUT);
+
+  // Initialize the servo pin as output
+  feedingServo.attach(servoPin);
+
+  // Initialize the proximity sensor pin as input
+  pinMode(proximitySensorPin, INPUT);
+
+  // Initialize heating control pins as output
+  pinMode(normalHeatPin, OUTPUT);
+  pinMode(highHeatPin, OUTPUT);
+  pinMode(lowHeatPin, OUTPUT);
+
+  // Initialize serial communication for debugging
+  Serial.begin(9600);
+
+  // Initialize software serial communication for voice recognition
+  mySerial.begin(9600);
+
+  // Initialize voice recognition module
+  voiceRec.begin(mySerial);
+  voiceRec.addCommand(CMD_PICK_UP_FOOD);
+  voiceRec.addCommand(CMD_KEEP_IT);
+  voiceRec.addCommand(CMD_IM_HUNGRY);
+  voiceRec.addCommand(CMD_I_NEED_FOOD);
+  voiceRec.addCommand(CMD_SLOWLY_FEED);
+  voiceRec.addCommand(CMD_MORE);
+  voiceRec.addCommand(CMD_NORMAL_HEAT);
+  voiceRec.addCommand(CMD_HIGH_HEAT);
+  voiceRec.addCommand(CMD_LOW_HEAT);
+}
+
+void loop() {
+  // Check for voice commands
+  if (voiceRec.available()) {
+    String command = voiceRec.read();
+    Serial.println("Command received: " + command);
+
+    if (command == CMD_PICK_UP_FOOD) {
+      pickUpFood();
+    } else if (command == CMD_KEEP_IT) {
+      keepFood();
+    } else if (command == CMD_IM_HUNGRY || command == CMD_I_NEED_FOOD) {
+      if (foodDetected()) {
+        bringFoodToMouth();
+      }
+    } else if (command == CMD_SLOWLY_FEED) {
+      slowlyFeed();
+    } else if (command == CMD_MORE) {
+      moreFood();
+    } else if (command == CMD_NORMAL_HEAT) {
+      normalHeat();
+    } else if (command == CMD_HIGH_HEAT) {
+      highHeat();
+    } else if (command == CMD_LOW_HEAT) {
+      lowHeat();
+    }
+
+    // Return the servo to the initial position after command execution
+    resetPosition();
+  }
+
+  // Read the state of the main button
+  buttonState = digitalRead(buttonPin);
+
+  // Read the state of each command button
+  buttonPickUpState = digitalRead(buttonPickUpPin);
+  buttonKeepState = digitalRead(buttonKeepPin);
+  buttonHungryState = digitalRead(buttonHungryPin);
+  buttonNeedFoodState = digitalRead(buttonNeedFoodPin);
+  buttonSlowlyFeedState = digitalRead(buttonSlowlyFeedPin);
+  buttonMoreState = digitalRead(buttonMorePin);
+  buttonNormalHeatState = digitalRead(buttonNormalHeatPin);
+  buttonHighHeatState = digitalRead(buttonHighHeatPin);
+  buttonLowHeatState = digitalRead(buttonLowHeatPin);
+
+  // If the main button is pressed
+  if (buttonState == HIGH) {
+    pickUpFood();
+    if (foodDetected()) {
+      bringFoodToMouth();
+    }
+    resetPosition();
+  }
+
+  // Check each command button state and execute corresponding function
+  if (buttonPickUpState == HIGH) {
+    pickUpFood();
+    resetPosition();
+  }
+
+  if (buttonKeepState == HIGH) {
+    keepFood();
+    resetPosition();
+  }
+
+  if (buttonHungryState == HIGH || buttonNeedFoodState == HIGH) {
+    if (foodDetected()) {
+      bringFoodToMouth();
+    }
+    resetPosition();
+  }
+
+  if (buttonSlowlyFeedState == HIGH) {
+    slowlyFeed();
+    resetPosition();
+  }
+
+  if (buttonMoreState == HIGH) {
+    moreFood();
+    resetPosition();
+  }
+
+  if (buttonNormalHeatState == HIGH) {
+    normalHeat();
+  }
+
+  if (buttonHighHeatState == HIGH) {
+    highHeat();
+  }
+
+  if (buttonLowHeatState == HIGH) {
+    lowHeat();
+  }
+
+  // Detect eating state
+  detectEatingState();
+}
+
+void pickUpFood() {
+  // Move the servo to pick up food (adjust angles as needed)
+  feedingServo.write(90);
+  delay(1000); // Wait for the servo to move
+}
+
+bool foodDetected() {
+  // Use proximity sensor to detect food
+  int sensorValue = analogRead(proximitySensorPin);
+  Serial.println(sensorValue);
+  return sensorValue > 500; // Adjust threshold value as needed
+}
+
+void bringFoodToMouth() {
+  // Move the servo to bring food to the mouth (adjust angles as needed)
+  feedingServo.write(0);
+  delay(2000); // Wait for the servo to move
+}
+
+void slowlyFeed() {
+  // Move the servo to slowly bring food to the mouth (adjust angles and delay as needed)
+  feedingServo.write(45);
+  delay(3000); // Wait for the servo to move slowly
+  feedingServo.write(0);
+  delay(3000); // Wait for the servo to move slowly
+}
+
+void keepFood() {
+  // Move the servo to a position to keep the food (adjust angles as needed)
+  feedingServo.write(120);
+  delay(1000); // Wait for the servo to move
+}
+
+void moreFood() {
+  // Repeat the feeding process for more food
+  for (int i = 0; i < 3; i++) { // Adjust the number of repetitions as needed
+    pickUpFood();
+    if (foodDetected()) {
+      bringFoodToMouth();
+    }
+    resetPosition();
+  }
+}
+
+void resetPosition() {
+  // Return the servo to the initial position
+  feedingServo.write(90);
+  delay(1000); // Wait for the servo to move
+}
+
+void normalHeat() {
+  // Turn on the normal heat relay
+  digitalWrite(normalHeatPin, HIGH);
+  digitalWrite(highHeatPin, LOW);
+  digitalWrite(lowHeatPin, LOW);
+  Serial.println("Normal heat activated.");
+}
+
+void highHeat() {
+  // Turn on the high heat relay
+  digitalWrite(normalHeatPin, LOW);
+  digitalWrite(highHeatPin, HIGH);
+  digitalWrite(lowHeatPin, LOW);
+  Serial.println("High heat activated.");
+}
+
+void lowHeat() {
+  // Turn on the low heat relay
+  digitalWrite(normalHeatPin, LOW);
+  digitalWrite(highHeatPin, LOW);
+  digitalWrite(lowHeatPin, HIGH);
+  Serial.println("Low heat activated.");
+}
+
+void detectEatingState() {
+  int proximityValue = analogRead(proximitySensorPin);
+  int pressureValue = analogRead(pressureSensorPin);
+  int infraredValue = analogRead(infraredSensorPin);
+
+  if (pressureValue > 600 && infraredValue > 600) { // Adjust threshold values as needed
+    eatingState = EATING;
+    Serial.println("Eating...");
+  } else if (proximityValue > 500) {
+    eatingState = NOT_EATING;
+    Serial.println("Not eating...");
+  } else {
+    eatingState = ATE;
+    Serial.println("Ate.");
+  }
+}
